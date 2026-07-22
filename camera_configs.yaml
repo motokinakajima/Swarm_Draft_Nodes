@@ -1,0 +1,26 @@
+peer_detector:
+  ros__parameters:
+    marker_R: 0.2 #meters
+    camera_num: 3
+    cameras:
+      # fov in deg
+      # heading in deg, front 0, right hand coordinates
+      # position in m, robot centric
+      cam1:
+        topic_name: "/camera1/image_raw"
+        fov: 90.0
+        heading: 0.0
+        resolution: [640, 480]
+        position: [0.0, 0.0, 0.0]
+      cam2:
+        topic_name: "/camera2/image_raw"
+        fov: 90.0
+        heading: 120.0
+        resolution: [640, 480]
+        position: [1.0, 0.0, 0.0]
+      cam3:
+        topic_name: "/camera3/image_raw"
+        fov: 90.0
+        heading: 240.0
+        resolution: [640, 480]
+        position: [0.5, 1.0, 0.0]
