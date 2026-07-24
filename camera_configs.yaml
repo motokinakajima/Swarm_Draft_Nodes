@@ -1,6 +1,6 @@
 peer_detector:
   ros__parameters:
-    marker_R: 0.2 #meters
+    marker_R: 0.1016 #meters, 4 in
     camera_num: 3
     cameras:
       # fov in deg
