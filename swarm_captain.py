@@ -3,6 +3,8 @@ from rclpy.node import Node
 
 import numpy as np
 
+#RGBA, sensor_msg/image
+
 from peer_detector.msg import PeerDetection, PeerDetections
 from std_msgs.msg import Float64
 from geometry_msgs.msg import TwistStamped
@@ -45,7 +47,7 @@ class SwarmCaptain(Node):
         self.temp_subscriber  # prevent unused variable warning
         
         self.velocity_publisher = self.create_publisher(
-            Float64,
+            TwistStamped,
             '/mavros/setpoint_velocity/cmd_vel',
             10
         )
@@ -67,7 +69,7 @@ class SwarmCaptain(Node):
         self.curr_temp = msg.data
 
     def make_decision(self):
-        net_force = self.temp_subscriber.get_avoidance() * self.k_avoidance + self.get_quark() * self.k_quark + self.get_directional() * self.k_directional
+        net_force = self.get_avoidance() * self.k_avoidance + self.get_quark() * self.k_quark + self.get_directional() * self.k_directional
         
         vel = TwistStamped()
         vel.header.stamp = self.get_clock().now().to_msg()

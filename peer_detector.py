@@ -20,6 +20,8 @@ class PeerDetector(Node):
         camera_params = self.get_parameters_by_prefix('cameras')
         
         self.marker_R = self.get_parameter('marker_R').value
+        self.lower_color = np.array(self.get_parameter('lower_color').value)
+        self.upper_color = np.array(self.get_parameter('upper_color').value)
         
         self.cameras_info = {}
         self.camera_subscribers = {}
@@ -31,6 +33,8 @@ class PeerDetector(Node):
         )
         
         self.bridge = CvBridge()
+        
+        self.latest_images = {}
         
         for key, param in camera_params.items():
             cam_id, prop = key.split('.', 1)
@@ -55,32 +59,45 @@ class PeerDetector(Node):
             info['heading_rad'] = np.radians(info['heading'])
             info['width'] = info['resolution'][0]
             
+        timer_frequency = self.get_parameter('detection_frequency').value  # Hz
+        self.timer = self.create_timer(1 / timer_frequency, self.timer_callback)
+            
     def image_callback(self, img_msg, cam_id):
+        self.latest_images[cam_id] = img_msg
+
+    def timer_callback(self):
+        if not self.latest_images:
+            return
+
         msg = PeerDetections()
         msg.header.stamp = self.get_clock().now().to_msg()
-
-        #cv2 HSV masking and contouring right here
-        detected_markers = {} #x_camera, y_camera, marker_R_camera, [x,y,R]
         
-        cam = self.cameras_info[cam_id]
-        fov_rad = cam['fov_rad']
-        heading_rad = cam['heading_rad']
-        width = cam['width']
-        cam_x, cam_y = cam['position'][0], cam['position'][1]
-        
-        for marker in detected_markers:
-            phi_rad = fov_rad * (marker['x'] / width - 0.5) #right hand with z ground facing
-            d = (self.marker_R * width) / (marker['R'] * fov_rad) #distance to marker in meters
-            total_heading_rad = phi_rad + heading_rad
-            x_robot = d * np.sin(total_heading_rad) + cam_x
-            y_robot = d * np.cos(total_heading_rad) + cam_y
-            detection = PeerDetection()
-            detection.relative_x = float(x_robot)
-            detection.relative_y = float(y_robot)
-            detection.confidence = 1.0
-            msg.peer_detections.append(detection)
+        for cam_id, img_msg in list(self.latest_images.items()):
+            try:
+                cv_image = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding='bgr8')
+            except Exception as e:
+                self.get_logger().error(f'CV Bridge Error on {cam_id}: {e}')
+                continue
+                
+            detected_markers = image_to_detection(cv_image, self.lower_color, self.upper_color)
+            cam = self.cameras_info[cam_id]
+            fov_rad = cam['fov_rad']
+            heading_rad = cam['heading_rad']
+            width = cam['width']
+            cam_pos_x, cam_pos_y = cam['position'][0], cam['position'][1]
             
+            for marker in detected_markers:
+                x_robot, y_robot = detection_to_robot_coords(
+                    marker['x'], marker['y'], marker['R'], fov_rad, heading_rad, width, self.marker_R, cam_pos_x, cam_pos_y
+                )
+                detection = PeerDetection()
+                detection.relative_x = float(x_robot)
+                detection.relative_y = float(y_robot)
+                detection.confidence = 1.0
+                msg.peer_detections.append(detection)
+        
         self.publisher.publish(msg)
+        self.latest_images.clear()
     
 def main(args=None):
     rclpy.init(args=args)
@@ -91,3 +108,36 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+
+def image_to_detection(image, lower_color, upper_color):
+    # Convert image to HSV
+    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    
+    # Create a mask for the defined color
+    mask = cv2.inRange(hsv_image, lower_color, upper_color)
+    
+    # Find contours in the mask
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    detected_markers = []
+    
+    for contour in contours:
+        # Calculate the minimum enclosing circle for each contour
+        ((x, y), radius) = cv2.minEnclosingCircle(contour)
+        
+        if radius > 5:  # Filter out small detections
+            detected_markers.append({
+                'x': x,
+                'y': y,
+                'R': radius
+            })
+    
+    return detected_markers
+    
+def detection_to_robot_coords(x_cam, y_cam, marker_R_cam, fov_rad, heading_rad, width, marker_R, cam_pos_x, cam_pos_y):
+    phi_rad = fov_rad * (x_cam / width - 0.5) #right hand with z ground facing
+    d = (marker_R * width) / (marker_R_cam * fov_rad) #distance to marker in meters
+    total_heading_rad = phi_rad + heading_rad
+    x_robot = d * np.cos(total_heading_rad) + cam_pos_x
+    y_robot = d * np.sin(total_heading_rad) + cam_pos_y
+    return x_robot, y_robot
