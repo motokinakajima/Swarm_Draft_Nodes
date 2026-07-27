@@ -19,11 +19,6 @@ class PeerDetector(Node):
         
         camera_params = self.get_parameters_by_prefix('cameras')
         
-        self.declare_parameter('marker_R', 0.1016)
-        self.declare_parameter('lower_color', [0, 100, 100])
-        self.declare_parameter('upper_color', [10, 255, 255])
-        self.declare_parameter('detection_frequency', 3.0)
-        
         self.marker_R = self.get_parameter('marker_R').value
         self.lower_color = np.array(self.get_parameter('lower_color').value)
         self.upper_color = np.array(self.get_parameter('upper_color').value)

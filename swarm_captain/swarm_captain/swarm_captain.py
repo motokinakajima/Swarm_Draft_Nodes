@@ -16,16 +16,6 @@ class SwarmCaptain(Node):
             automatically_declare_parameters_from_overrides=True
         )
         
-        self.declare_parameter('k_avoidance', 1.0)
-        self.declare_parameter('k_quark', 1.0)
-        self.declare_parameter('k_directional', 1.0)
-        self.declare_parameter('k_velocity', 1.0)
-        self.declare_parameter('k_heading', 1.0)
-        self.declare_parameter('avoidance_radius', 1.0)
-        self.declare_parameter('quark_saturation_distance', 1.0)
-        self.declare_parameter('quark_max_force', 1.0)
-        self.declare_parameter('eps', 1e-6)
-        
         self.k_avoidance = self.get_parameter('k_avoidance').value
         self.k_quark = self.get_parameter('k_quark').value
         self.k_directional = self.get_parameter('k_directional').value
