@@ -117,7 +117,8 @@ class SwarmCaptain(Node):
         return force
     
     def get_directional(self):
-        pass
+        # TODO: implement
+        return np.zeros(2)
     
 def main(args=None):
     rclpy.init(args=args)
