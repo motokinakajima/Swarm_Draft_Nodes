@@ -1,4 +1,4 @@
-swarm_captain:
+*:
   ros__parameters:
     k_avoidance: 1.0
     k_quark: 1.0
