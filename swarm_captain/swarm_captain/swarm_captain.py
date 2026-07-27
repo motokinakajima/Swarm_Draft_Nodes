@@ -16,18 +16,18 @@ class SwarmCaptain(Node):
             automatically_declare_parameters_from_overrides=True
         )
         
-        self.avoidance_radius = self.get_parameter('avoidance_radius').value
-        self.quark_saturation_distance = self.get_parameter('quark_saturation_distance').value
-        self.quark_max_force = self.get_parameter('quark_max_force').value
-        
-        self.eps = self.get_parameter('eps').value
-        
         self.k_avoidance = self.get_parameter('k_avoidance').value
         self.k_quark = self.get_parameter('k_quark').value
         self.k_directional = self.get_parameter('k_directional').value
         
         self.k_velocity = self.get_parameter('k_velocity').value
         self.k_heading = self.get_parameter('k_heading').value
+        
+        self.avoidance_radius = self.get_parameter('avoidance_radius').value
+        self.quark_saturation_distance = self.get_parameter('quark_saturation_distance').value
+        self.quark_max_force = self.get_parameter('quark_max_force').value
+        
+        self.eps = self.get_parameter('eps').value
         
         self.peer_detection_subscriber = self.create_subscription(
             PolygonStamped,

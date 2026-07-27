@@ -1,0 +1,13 @@
+swarm_captain:
+  ros__parameters:
+    k_avoidance: 1.0
+    k_quark: 1.0
+    k_directional: 1.0
+
+    k_velocity: 1.0
+    k_heading: 1.0
+
+    avoidance_radius: 0.5
+    quark_saturation_distance: 1.0
+    quark_max_force: 1.0
+    eps: 0.01
