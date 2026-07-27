@@ -6,7 +6,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_share = get_package_share_directory('peer_detector')
     
-    config_file = os.path.join(pkg_share, 'config', 'cameras_configs.yaml')
+    config_file = os.path.join(pkg_share, 'config', 'camera_configs.yaml')
 
     return LaunchDescription([
         Node(
