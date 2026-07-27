@@ -2,8 +2,8 @@ peer_detector_node:
   ros__parameters:
     marker_R: 0.1016 #meters, 4 in
     camera_num: 3
-    lower_color: [0, 100, 100] #HSV
-    upper_color: [10, 255, 255] #HSV
+    lower_color: [160, 0, 0] #HSV
+    upper_color: [180, 255, 255] #HSV
     detection_frequency: 3.0 #Hz
     cameras:
       # fov in deg
