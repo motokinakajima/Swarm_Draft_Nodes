@@ -5,9 +5,8 @@ import numpy as np
 
 #RGBA, sensor_msg/image
 
-from peer_detector.msg import PeerDetection, PeerDetections
 from std_msgs.msg import Float64
-from geometry_msgs.msg import TwistStamped
+from geometry_msgs.msg import TwistStamped, PolygonStamped, Point32
 
 class SwarmCaptain(Node):
     def __init__(self):
@@ -31,7 +30,7 @@ class SwarmCaptain(Node):
         self.k_heading = self.get_parameter('k_heading').value
         
         self.peer_detection_subscriber = self.create_subscription(
-            PeerDetections,
+            PolygonStamped,
             'peer_detection',
             self.peer_detection_callback,
             10
@@ -56,12 +55,15 @@ class SwarmCaptain(Node):
         self.curr_temp = None
         self.prev_temp = None
         
+        control_frequency = 10.0  # Hz
+        self.timer = self.create_timer(1.0 / control_frequency, self.make_decision)
+        
     def peer_detection_callback(self, msg):
-        if not msg.peer_detections:
+        if not msg.polygon.points:
             self.peer_detections = np.empty((0, 2)) # (x, y)
             return
         
-        coords = [[d.relative_x, d.relative_y] for d in msg.peer_detections]
+        coords = [[p.x, p.y] for p in msg.polygon.points]
         self.peer_detections = np.array(coords)
         
     def temp_callback(self, msg):
@@ -87,8 +89,9 @@ class SwarmCaptain(Node):
         for peer in self.peer_detections:
             d = np.linalg.norm(peer)
             if d < self.avoidance_radius:
-                repulsion = - peer * (1.0 / (d + self.eps))
-                force += repulsion
+                unit_away = -peer / d
+                magnitude = 1.0 / (d + self.eps)
+                force += unit_away * magnitude
         return force
 
     def get_quark(self):

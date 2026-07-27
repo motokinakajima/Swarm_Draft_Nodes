@@ -7,7 +7,7 @@ import cv2
 
 import numpy as np
 
-from peer_detector.msg import PeerDetection, PeerDetections
+from geometry_msgs.msg import PolygonStamped, Point32
 
 class PeerDetector(Node):
     def __init__(self):
@@ -27,7 +27,7 @@ class PeerDetector(Node):
         self.camera_subscribers = {}
         
         self.publisher = self.create_publisher(
-            msg_type=PeerDetections,
+            msg_type=PolygonStamped,
             topic='peer_detection',
             qos_profile=10
         )
@@ -60,7 +60,7 @@ class PeerDetector(Node):
             info['width'] = info['resolution'][0]
             
         timer_frequency = self.get_parameter('detection_frequency').value  # Hz
-        self.timer = self.create_timer(1 / timer_frequency, self.timer_callback)
+        self.timer = self.create_timer(1.0 / timer_frequency, self.timer_callback)
             
     def image_callback(self, img_msg, cam_id):
         self.latest_images[cam_id] = img_msg
@@ -69,8 +69,9 @@ class PeerDetector(Node):
         if not self.latest_images:
             return
 
-        msg = PeerDetections()
+        msg = PolygonStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'base_link'
         
         for cam_id, img_msg in list(self.latest_images.items()):
             try:
@@ -90,11 +91,11 @@ class PeerDetector(Node):
                 x_robot, y_robot = detection_to_robot_coords(
                     marker['x'], marker['y'], marker['R'], fov_rad, heading_rad, width, self.marker_R, cam_pos_x, cam_pos_y
                 )
-                detection = PeerDetection()
-                detection.relative_x = float(x_robot)
-                detection.relative_y = float(y_robot)
-                detection.confidence = 1.0
-                msg.peer_detections.append(detection)
+                point = Point32()
+                point.x = float(x_robot)
+                point.y = float(y_robot)
+                point.z = 0.0
+                msg.polygon.points.append(point)
         
         self.publisher.publish(msg)
         self.latest_images.clear()
