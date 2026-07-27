@@ -75,7 +75,7 @@ class PeerDetector(Node):
         
         for cam_id, img_msg in list(self.latest_images.items()):
             try:
-                cv_image = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding='bgra8')
+                cv_image = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding='bgr8')
             except Exception as e:
                 self.get_logger().error(f'CV Bridge Error on {cam_id}: {e}')
                 continue
@@ -112,7 +112,7 @@ if __name__ == '__main__':
 
 def image_to_detection(image, lower_color, upper_color):
     # Convert image to HSV
-    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGA2HSV)
+    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     
     # Create a mask for the defined color
     mask = cv2.inRange(hsv_image, lower_color, upper_color)
