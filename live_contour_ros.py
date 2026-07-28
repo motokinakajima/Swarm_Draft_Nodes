@@ -230,7 +230,6 @@ class HSVContourApp:
         if self.image is None:
             return
 
-        # 1. Masking
         hsv = cv2.cvtColor(self.image, cv2.COLOR_RGB2HSV)
         hmin, hmax = self.sliders["Hue Min"].get(), self.sliders["Hue Max"].get()
         smin, smax = self.sliders["Sat Min"].get(), self.sliders["Sat Max"].get()
@@ -247,48 +246,48 @@ class HSVContourApp:
             mask2 = cv2.inRange(hsv, np.array([0, smin, vmin]), np.array([hmax, smax, vmax]))
             mask = cv2.bitwise_or(mask1, mask2)
 
-        # 2. Morphological Operations
         if self.sliders["Enable Morph"].get():
             kernel = np.ones((3, 3), np.uint8)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-        # 3. Contour Detection & Processing
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         output = self.image.copy()
         
         valid_detections = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
-
             if amin <= area <= amax:
                 ((x, y), radius) = cv2.minEnclosingCircle(cnt)
                 if radius > 5:
                     valid_detections.append((cnt, x, y, radius))
 
-        target_found = False
+        coords_list = []
         
         if valid_detections:
-            target_found = True
-            last_det = valid_detections[-1]
-            cnt, x_cam, y_cam, r_cam = last_det
-            
-            cv2.drawContours(output, [cnt], -1, (255, 0, 0), 2)
-            cv2.circle(output, (int(x_cam), int(y_cam)), int(r_cam), (0, 255, 0), 2)
-            cv2.circle(output, (int(x_cam), int(y_cam)), 5, (0, 0, 255), -1)
-            
-            x_rob, y_rob = self.detection_to_robot_coords(x_cam, y_cam, r_cam)
-            self.plot_coordinates(x_rob, y_rob)
-        else:
-            self.plot_coordinates(None, None)
+            for idx, det in enumerate(valid_detections):
+                cnt, x_cam, y_cam, r_cam = det
+                
+                cv2.drawContours(output, [cnt], -1, (255, 0, 0), 2)
+                cv2.circle(output, (int(x_cam), int(y_cam)), int(r_cam), (0, 255, 0), 2)
+                cv2.circle(output, (int(x_cam), int(y_cam)), 5, (0, 0, 255), -1)
+                
+                cv2.putText(output, f"#{idx+1}", (int(x_cam)-10, int(y_cam)-10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                
+                x_rob, y_rob = self.detection_to_robot_coords(x_cam, y_cam, r_cam)
+                coords_list.append((x_rob, y_rob))
 
-        self.count_label.config(text=f"Target found: {target_found}")
+        self.count_label.config(text=f"Targets found: {len(valid_detections)}")
+        self.plot_coordinates(coords_list)
         
         self.display_image(self.image, self.original_canvas)
         self.display_image(cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB), self.mask_canvas)
         self.display_image(output, self.result_canvas)
 
-    def plot_coordinates(self, x, y):
+
+    def plot_coordinates(self, coords_list):
+        """検出された複数の座標 (coords_list) をすべて2Dマップ上にプロット"""
         self.plot_canvas.delete("all")
         w = self.plot_canvas.winfo_width()
         h = self.plot_canvas.winfo_height()
@@ -301,15 +300,23 @@ class HSVContourApp:
         self.plot_canvas.create_oval(cx-6, cy-6, cx+6, cy+6, fill="blue")
         self.plot_canvas.create_text(cx+10, cy+10, text="Robot", fill="blue", anchor="nw")
         
-        if x is not None and y is not None:
+        if coords_list:
             scale_px_per_m = 50 
-            plot_x = cx - (y * scale_px_per_m)
-            plot_y = cy - (x * scale_px_per_m)
-            self.plot_canvas.create_oval(plot_x-5, plot_y-5, plot_x+5, plot_y+5, fill="red")
+            text_summary = "Target Positions:\n"
+            
+            for idx, (x, y) in enumerate(coords_list):
+                plot_x = cx + (y * scale_px_per_m)
+                plot_y = cy - (x * scale_px_per_m)
+                
+                self.plot_canvas.create_oval(plot_x-5, plot_y-5, plot_x+5, plot_y+5, fill="red")
+                self.plot_canvas.create_text(plot_x+7, plot_y-7, text=f"#{idx+1}", fill="black", font=("Arial", 9, "bold"))
+                
+                text_summary += f" #{idx+1}: X={x:.2f}m, Y={y:.2f}m\n"
+            
             self.plot_canvas.create_text(
                 10, 10, anchor="nw", 
-                text=f"Target Pos:\n X: {x:.2f} m (Forward)\n Y: {y:.2f} m (Left)", 
-                font=("Arial", 11, "bold"), fill="red"
+                text=text_summary, 
+                font=("Arial", 10, "bold"), fill="red"
             )
 
     def display_image(self, img, canvas):
