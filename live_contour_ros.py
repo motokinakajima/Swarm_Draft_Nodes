@@ -9,6 +9,8 @@ import time
 import threading
 from queue import Queue, Empty
 
+import argparse
+
 # --- ROS 2 Imports ---
 import rclpy
 from rclpy.node import Node
@@ -341,11 +343,24 @@ def ros_spin_thread(node):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="ROS Stuff."
+    )
+    
+    parser.add_argument(
+        "-t", "--topic", 
+        type=str, 
+        default='/camera1/image_raw', 
+        help="Name of the topic to subscribe to (default: /camera1/image_raw)"
+    )
+    args = parser.parse_args()
+    topic_name = args.topic
+    
     rclpy.init()
     root = tk.Tk()
     app = HSVContourApp(root)
     
-    ros_node = ROSImageSubscriber(app, topic_name='/camera1/image_raw')
+    ros_node = ROSImageSubscriber(app, topic_name=topic_name)
     spin_thread = threading.Thread(target=ros_spin_thread, args=(ros_node,), daemon=True)
     spin_thread.start()
 
