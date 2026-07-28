@@ -180,5 +180,4 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-*.yaml
-.yaml
+config/*
