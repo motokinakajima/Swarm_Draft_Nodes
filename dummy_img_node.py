@@ -40,9 +40,9 @@ class DummyGradientPublisher(Node):
         target_x = int(self.width / 2 + np.sin(t * 1.2) * 100)
         target_y = int(self.height / 2 + np.cos(t * 0.9) * 80)
         
-        cv2.circle(cv_image, (target_x, target_y), 15, (0, 0, 255), -1)
-        
-        cv2.circle(cv_image, (target_x - 3, target_y - 3), 4, (200, 200, 255), -1)
+        cv2.circle(cv_image, (target_x, target_y), 15, (255, 0, 255), -1)
+
+        cv2.circle(cv_image, (target_x - 3, target_y - 3), 4, (255, 200, 255), -1)
 
         msg = self.bridge.cv2_to_imgmsg(cv_image, encoding="bgr8")
         msg.header.stamp = self.get_clock().now().to_msg()
