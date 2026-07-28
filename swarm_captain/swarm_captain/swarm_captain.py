@@ -6,7 +6,7 @@ import numpy as np
 #RGBA, sensor_msg/image
 
 from std_msgs.msg import Float64
-from geometry_msgs.msg import TwistStamped, PolygonStamped, Point32
+from geometry_msgs.msg import TwistStamped, PolygonStamped, Vector3Stamped, Point32
 
 class SwarmCaptain(Node):
     def __init__(self):
@@ -26,6 +26,11 @@ class SwarmCaptain(Node):
         self.avoidance_radius = self.get_parameter('avoidance_radius').value
         self.quark_saturation_distance = self.get_parameter('quark_saturation_distance').value
         self.quark_max_force = self.get_parameter('quark_max_force').value
+        
+        self.pub_force_avoid = self.create_publisher(Vector3Stamped, 'debug/force_avoidance', 10)
+        self.pub_force_quark = self.create_publisher(Vector3Stamped, 'debug/force_quark', 10)
+        self.pub_force_dir = self.create_publisher(Vector3Stamped, 'debug/force_directional', 10)
+        self.pub_force_net = self.create_publisher(Vector3Stamped, 'debug/force_net', 10)
         
         self.eps = self.get_parameter('eps').value
         
@@ -47,7 +52,7 @@ class SwarmCaptain(Node):
         
         self.velocity_publisher = self.create_publisher(
             TwistStamped,
-            '/mavros/setpoint_velocity/cmd_vel',
+            'mavros/setpoint_velocity/cmd_vel',
             10
         )
         
@@ -71,7 +76,26 @@ class SwarmCaptain(Node):
         self.curr_temp = msg.data
 
     def make_decision(self):
-        net_force = self.get_avoidance() * self.k_avoidance + self.get_quark() * self.k_quark + self.get_directional() * self.k_directional
+        now = self.get_clock().now().to_msg()
+    
+        f_avoid = self.get_avoidance() * self.k_avoidance
+        f_quark = self.get_quark() * self.k_quark
+        f_dir = self.get_directional() * self.k_directional
+        net_force = f_avoid + f_quark + f_dir
+    
+        def publish_vector(publisher, force_array):
+            msg = Vector3Stamped()
+            msg.header.stamp = now
+            msg.header.frame_id = 'base_link'
+            msg.vector.x = float(force_array[0])
+            msg.vector.y = float(force_array[1])
+            msg.vector.z = 0.0
+            publisher.publish(msg)
+
+        publish_vector(self.pub_force_avoid, f_avoid)
+        publish_vector(self.pub_force_quark, f_quark)
+        publish_vector(self.pub_force_dir, f_dir)
+        publish_vector(self.pub_force_net, net_force)
         
         vel = TwistStamped()
         vel.header.stamp = self.get_clock().now().to_msg()
