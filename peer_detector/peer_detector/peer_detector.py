@@ -63,6 +63,17 @@ class PeerDetector(Node):
             info['heading_rad'] = np.radians(info['heading'])
             info['width'] = info['resolution'][0]
             
+        self.debug_img_pubs = {}
+        for cam_id in self.cameras_info.keys():
+            topic_name = f'/{cam_id}/detection_img'
+    
+            self.debug_img_pubs[cam_id] = self.create_publisher(
+                msg_type=Image,
+                topic=topic_name,
+                qos_profile=10
+            )
+            self.get_logger().info(f"Created publisher for [{cam_id}] on topic: {topic_name}")
+            
         timer_frequency = self.get_parameter('detection_frequency').value  # Hz
         self.timer = self.create_timer(1.0 / timer_frequency, self.timer_callback)
             
@@ -100,6 +111,14 @@ class PeerDetector(Node):
                 point.y = float(y_robot)
                 point.z = 0.0
                 msg.polygon.points.append(point)
+                
+            if cam_id in self.debug_img_pubs:
+                try:
+                    debug_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding='bgr8')
+                    debug_msg.header = img_msg.header
+                    self.debug_img_pubs[cam_id].publish(debug_msg)
+                except Exception as e:
+                    self.get_logger().error(f'Failed to publish debug image for {cam_id}: {e}')
         
         self.publisher.publish(msg)
         self.latest_images.clear()
@@ -151,6 +170,9 @@ def image_to_detection(image, lower_hsv, upper_hsv, min_area_percent=0.01, max_a
                     'y': y,
                     'R': radius
                 })
+                
+                cv2.circle(image, (int(x), int(y)), int(radius), (0, 255, 0), 2)
+                cv2.circle(image, (int(x), int(y)), 2, (0, 0, 255), 3)
                 
     return detected_markers
     
