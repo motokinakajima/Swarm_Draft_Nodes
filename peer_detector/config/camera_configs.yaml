@@ -4,6 +4,10 @@ peer_detector_node:
     camera_num: 3
     lower_color: [160, 0, 0] #HSV
     upper_color: [180, 255, 255] #HSV
+    min_area_percent: 0.01 #%
+    max_area_percent: 50.0 #%
+    enable_morph: true
+    min_radius: 5 #pixels
     detection_frequency: 3.0 #Hz
     cameras:
       # fov in deg

@@ -22,6 +22,10 @@ class PeerDetector(Node):
         self.marker_R = self.get_parameter('marker_R').value
         self.lower_color = np.array(self.get_parameter('lower_color').value)
         self.upper_color = np.array(self.get_parameter('upper_color').value)
+        self.min_area_percent = self.get_parameter('min_area_percent').value
+        self.max_area_percent = self.get_parameter('max_area_percent').value
+        self.enable_morph = self.get_parameter('enable_morph').value
+        self.min_radius = self.get_parameter('min_radius').value
         
         self.cameras_info = {}
         self.camera_subscribers = {}
@@ -80,7 +84,7 @@ class PeerDetector(Node):
                 self.get_logger().error(f'CV Bridge Error on {cam_id}: {e}')
                 continue
                 
-            detected_markers = image_to_detection(cv_image, self.lower_color, self.upper_color)
+            detected_markers = image_to_detection(cv_image, self.lower_color, self.upper_color, self.min_area_percent, self.max_area_percent, self.enable_morph, self.min_radius)
             cam = self.cameras_info[cam_id]
             fov_rad = cam['fov_rad']
             heading_rad = cam['heading_rad']
@@ -110,29 +114,44 @@ def main(args=None):
 if __name__ == '__main__':
     main()
 
-def image_to_detection(image, lower_color, upper_color):
-    # Convert image to HSV
+def image_to_detection(image, lower_hsv, upper_hsv, min_area_percent=0.01, max_area_percent=50.0, enable_morph=True, min_radius=5):
+    
     hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     
-    # Create a mask for the defined color
-    mask = cv2.inRange(hsv_image, lower_color, upper_color)
+    hmin, smin, vmin = lower_hsv
+    hmax, smax, vmax = upper_hsv
     
-    # Find contours in the mask
+    if hmin <= hmax:
+        mask = cv2.inRange(hsv_image, np.array([hmin, smin, vmin]), np.array([hmax, smax, vmax]))
+    else:
+        mask1 = cv2.inRange(hsv_image, np.array([hmin, smin, vmin]), np.array([179, smax, vmax]))
+        mask2 = cv2.inRange(hsv_image, np.array([0, smin, vmin]), np.array([hmax, smax, vmax]))
+        mask = cv2.bitwise_or(mask1, mask2)
+        
+    if enable_morph:
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        
+    total_pixels = image.shape[0] * image.shape[1]
+    amin = (min_area_percent / 100.0) * total_pixels
+    amax = (max_area_percent / 100.0) * total_pixels
+    
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     detected_markers = []
     
     for contour in contours:
-        # Calculate the minimum enclosing circle for each contour
-        ((x, y), radius) = cv2.minEnclosingCircle(contour)
-        
-        if radius > 5:  # Filter out small detections
-            detected_markers.append({
-                'x': x,
-                'y': y,
-                'R': radius
-            })
-    
+        area = cv2.contourArea(contour)
+        if amin <= area <= amax:
+            ((x, y), radius) = cv2.minEnclosingCircle(contour)
+            if radius > min_radius:
+                detected_markers.append({
+                    'x': x,
+                    'y': y,
+                    'R': radius
+                })
+                
     return detected_markers
     
 def detection_to_robot_coords(x_cam, y_cam, marker_R_cam, fov_rad, heading_rad, width, marker_R, cam_pos_x, cam_pos_y):

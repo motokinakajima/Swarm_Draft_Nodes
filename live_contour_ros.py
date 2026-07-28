@@ -287,7 +287,6 @@ class HSVContourApp:
 
 
     def plot_coordinates(self, coords_list):
-        """検出された複数の座標 (coords_list) をすべて2Dマップ上にプロット"""
         self.plot_canvas.delete("all")
         w = self.plot_canvas.winfo_width()
         h = self.plot_canvas.winfo_height()
