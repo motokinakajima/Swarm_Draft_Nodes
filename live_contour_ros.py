@@ -23,7 +23,6 @@ class ROSImageSubscriber(Node):
         self.app = app
         self.bridge = CvBridge()
         
-        # QoSの設定を削除し、デフォルト（キューサイズ10）の安全な設定に変更！
         self.subscription = self.create_subscription(
             RosImage,
             topic_name,
@@ -237,7 +236,6 @@ class HSVContourApp:
         smin, smax = self.sliders["Sat Min"].get(), self.sliders["Sat Max"].get()
         vmin, vmax = self.sliders["Val Min"].get(), self.sliders["Val Max"].get()
         
-        # --- 面積をパーセンテージからピクセル数に変換 ---
         total_pixels = self.image.shape[0] * self.image.shape[1]
         amin = (self.sliders["Min Area %"].get() / 100.0) * total_pixels
         amax = (self.sliders["Max Area %"].get() / 100.0) * total_pixels
@@ -262,7 +260,7 @@ class HSVContourApp:
         valid_detections = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            # 変換したピクセル数（amin, amax）でフィルタリング
+
             if amin <= area <= amax:
                 ((x, y), radius) = cv2.minEnclosingCircle(cnt)
                 if radius > 5:

@@ -88,7 +88,6 @@ class HSVContourApp:
         sliders_frame.pack(fill=tk.X, pady=5)
         
         self.sliders = {}
-        # パーセンテージ用に変更し、すべてのスライダーにresolution（刻み幅）を追加
         labels = [
             ("Hue Min", 0, 179, 0, 1), ("Hue Max", 0, 179, 179, 1),
             ("Sat Min", 0, 255, 50, 1), ("Sat Max", 0, 255, 255, 1),
