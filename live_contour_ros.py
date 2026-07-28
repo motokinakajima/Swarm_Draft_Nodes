@@ -9,39 +9,68 @@ import time
 import threading
 from queue import Queue, Empty
 
+# --- ROS 2 Imports ---
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image as RosImage
+from cv_bridge import CvBridge
+
+
+class ROSImageSubscriber(Node):
+    """ROS 2 Node to subscribe to image topic and feed the Tkinter app"""
+    def __init__(self, app, topic_name='/camera1/image_raw'):
+        super().__init__('hsv_tuner_node')
+        self.app = app
+        self.bridge = CvBridge()
+        
+        # QoSの設定を削除し、デフォルト（キューサイズ10）の安全な設定に変更！
+        self.subscription = self.create_subscription(
+            RosImage,
+            topic_name,
+            self.image_callback,
+            10
+        )
+        self.get_logger().info(f"Subscribed to {topic_name} with Default QoS")
+
+    def image_callback(self, msg):
+        if not self.app.running:
+            return
+            
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            
+            if not self.app.frame_queue.full():
+                self.app.frame_queue.put(cv_image)
+            else:
+                try:
+                    self.app.frame_queue.get_nowait()
+                    self.app.frame_queue.put(cv_image)
+                except Empty:
+                    pass
+        except Exception as e:
+            self.get_logger().error(f'CV Bridge Error: {e}')
+
+
 class HSVContourApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Real-time HSV Contour & Coordinate Detector")
+        self.root.title("ROS 2 HSV Contour & Coordinate Detector")
         self.root.geometry("1200x800")
         self.root.minsize(1000, 600)
-        
-        # macOS or Linux Camera Backend
-        self.cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION) # Change to CAP_V4L2 for Linux
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
-        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
         
         self.image = None
         self.running = True
         self.resize_width = 320
         self.resize_height = 240
         self.frame_skip_counter = 0
+        self.frame_queue = Queue(maxsize=2)
         
         # --- Camera & Robot Parameters ---
         self.fov_rad = np.radians(90.0)
         self.heading_rad = np.radians(0.0)
-        self.marker_R = 0.1016  # 4 inches in meters
+        self.marker_R = 0.1016
         self.cam_pos_x = 0.0
         self.cam_pos_y = 0.0
-
-        # Threading for camera capture
-        self.frame_queue = Queue(maxsize=2)
-        self.capture_thread = threading.Thread(target=self.capture_frames)
-        self.capture_thread.daemon = True
-        self.capture_thread.start()
 
         self.create_gui()
         self.update_frame()
@@ -65,10 +94,10 @@ class HSVContourApp:
         # Resolution
         res_frame = tk.Frame(control_frame)
         res_frame.pack(fill=tk.X, pady=(0, 10))
-        tk.Label(res_frame, text="Resolution:").pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(res_frame, text="Target Res:").pack(side=tk.LEFT, padx=(0, 5))
         self.resolution_combobox = ttk.Combobox(
             res_frame,
-            values=["160x120", "320x240", "640x480", "1280x720"],
+            values=["160x120", "320x240", "640x480"],
             state="readonly", width=10
         )
         self.resolution_combobox.set("320x240")
@@ -80,7 +109,7 @@ class HSVContourApp:
         status_frame.pack(fill=tk.X, pady=(0, 10))
         self.count_label = tk.Label(status_frame, text="Target found: False", font=("Arial", 10, "bold"))
         self.count_label.pack()
-        self.lag_label = tk.Label(status_frame, text="Processing lag: 0ms", font=("Arial", 9))
+        self.lag_label = tk.Label(status_frame, text="Waiting for ROS 2 Image...", font=("Arial", 9))
         self.lag_label.pack()
 
         # Sliders (Name, Min, Max, Default, Resolution)
@@ -88,12 +117,11 @@ class HSVContourApp:
         sliders_frame.pack(fill=tk.X, pady=5)
         
         self.sliders = {}
-        # パーセンテージ用に変更し、すべてのスライダーにresolution（刻み幅）を追加
         labels = [
             ("Hue Min", 0, 179, 0, 1), ("Hue Max", 0, 179, 179, 1),
             ("Sat Min", 0, 255, 50, 1), ("Sat Max", 0, 255, 255, 1),
             ("Val Min", 0, 255, 50, 1), ("Val Max", 0, 255, 255, 1),
-            ("Min Area %", 0.0, 100.0, 0.1, 0.1), ("Max Area %", 0.0, 100.0, 50.0, 0.1),
+            ("Min Area %", 0.0, 100.0, 0.1, 0.1), ("Max Area %", 0.0, 100.0, 50.0, 0.1), # パーセンテージ設定に変更
             ("Skip Frames", 0, 5, 0, 1), ("Enable Morph", 0, 1, 1, 1),
         ]
         
@@ -111,7 +139,7 @@ class HSVContourApp:
         
         original_frame = tk.Frame(top_display)
         original_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        tk.Label(original_frame, text="Original", font=("Arial", 10, "bold")).pack()
+        tk.Label(original_frame, text="ROS Original", font=("Arial", 10, "bold")).pack()
         self.original_canvas = tk.Canvas(original_frame, width=350, height=250, bg="gray90")
         self.original_canvas.pack(fill=tk.BOTH, expand=True)
         
@@ -137,27 +165,11 @@ class HSVContourApp:
         self.plot_canvas = tk.Canvas(plot_frame, width=350, height=250, bg="white")
         self.plot_canvas.pack(fill=tk.BOTH, expand=True)
 
-    def capture_frames(self):
-        while self.running:
-            ret, frame = self.cap.read()
-            if ret:
-                if not self.frame_queue.full():
-                    self.frame_queue.put(frame)
-                else:
-                    try:
-                        self.frame_queue.get_nowait()
-                        self.frame_queue.put(frame)
-                    except Empty:
-                        pass
-            time.sleep(0.001)
-
     def update_resolution(self, event=None):
         text = self.resolution_combobox.get()
         try:
             w, h = map(int, text.lower().split("x"))
             self.resize_width, self.resize_height = w, h
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
         except:
             pass
 
@@ -250,6 +262,7 @@ class HSVContourApp:
         valid_detections = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
+            # 変換したピクセル数（amin, amax）でフィルタリング
             if amin <= area <= amax:
                 ((x, y), radius) = cv2.minEnclosingCircle(cnt)
                 if radius > 5:
@@ -262,22 +275,17 @@ class HSVContourApp:
             last_det = valid_detections[-1]
             cnt, x_cam, y_cam, r_cam = last_det
             
-            # Draw on camera image
             cv2.drawContours(output, [cnt], -1, (255, 0, 0), 2)
             cv2.circle(output, (int(x_cam), int(y_cam)), int(r_cam), (0, 255, 0), 2)
             cv2.circle(output, (int(x_cam), int(y_cam)), 5, (0, 0, 255), -1)
             
-            # Math
             x_rob, y_rob = self.detection_to_robot_coords(x_cam, y_cam, r_cam)
-            
-            # Plot
             self.plot_coordinates(x_rob, y_rob)
         else:
             self.plot_coordinates(None, None)
 
         self.count_label.config(text=f"Target found: {target_found}")
         
-        # Update Displays
         self.display_image(self.image, self.original_canvas)
         self.display_image(cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB), self.mask_canvas)
         self.display_image(output, self.result_canvas)
@@ -297,9 +305,8 @@ class HSVContourApp:
         
         if x is not None and y is not None:
             scale_px_per_m = 50 
-            plot_x = cx + (y * scale_px_per_m)
+            plot_x = cx - (y * scale_px_per_m)
             plot_y = cy - (x * scale_px_per_m)
-            
             self.plot_canvas.create_oval(plot_x-5, plot_y-5, plot_x+5, plot_y+5, fill="red")
             self.plot_canvas.create_text(
                 10, 10, anchor="nw", 
@@ -324,14 +331,25 @@ class HSVContourApp:
         canvas.create_image(canvas_w//2, canvas_h//2, image=img_tk, anchor="center")
         canvas.image = img_tk
 
-    def on_closing(self):
-        self.running = False
-        self.cap.release()
-        self.root.destroy()
+
+def ros_spin_thread(node):
+    rclpy.spin(node)
 
 
 if __name__ == "__main__":
+    rclpy.init()
     root = tk.Tk()
     app = HSVContourApp(root)
-    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    
+    ros_node = ROSImageSubscriber(app, topic_name='/camera1/image_raw')
+    spin_thread = threading.Thread(target=ros_spin_thread, args=(ros_node,), daemon=True)
+    spin_thread.start()
+
+    def on_closing():
+        app.running = False
+        ros_node.destroy_node()
+        rclpy.shutdown()
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
