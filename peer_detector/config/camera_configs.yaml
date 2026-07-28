@@ -14,7 +14,7 @@ peer_detector_node:
       # heading in deg, front 0, right hand coordinates
       # position in m, robot centric
       cam1:
-        topic_name: "/camera1/image_raw"
+        topic_name: "/green/green_zedx_sn47983353/left/color/rect/image"
         fov: 90.0
         heading: 0.0
         resolution: [320, 240]

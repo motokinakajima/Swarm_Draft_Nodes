@@ -171,8 +171,10 @@ def image_to_detection(image, lower_hsv, upper_hsv, min_area_percent=0.01, max_a
                     'R': radius
                 })
                 
+                cv2.drawContours(image, [contour], -1, (255, 0, 0), 2)
+                
                 cv2.circle(image, (int(x), int(y)), int(radius), (0, 255, 0), 2)
-                cv2.circle(image, (int(x), int(y)), 2, (0, 0, 255), 3)
+                cv2.circle(image, (int(x), int(y)), 5, (0, 0, 255), -1)
                 
     return detected_markers
     
