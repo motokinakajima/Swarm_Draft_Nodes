@@ -98,7 +98,7 @@ class HSVContourApp:
         tk.Label(res_frame, text="Target Res:").pack(side=tk.LEFT, padx=(0, 5))
         self.resolution_combobox = ttk.Combobox(
             res_frame,
-            values=["160x120", "320x240", "640x480"],
+            values=["160x120", "320x240", "640x480", "1920x1080", "1920x1200"],
             state="readonly", width=10
         )
         self.resolution_combobox.set("320x240")
