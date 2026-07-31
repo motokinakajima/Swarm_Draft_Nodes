@@ -7,7 +7,7 @@ from pyproj import Transformer
 
 from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import Float64
-from geometry_msgs.msg import PointStamped, PolygonStamped, Point32
+from geometry_msgs.msg import TwistStamped, PolygonStamped, Point32
 
 
 def utm_epsg_for(lat, lon):
@@ -25,6 +25,7 @@ class PositionBroadcaster(Node):
 
         self.self_navsat_topic = self.get_parameter('self_navsat_topic').value
         self.self_heading_topic = self.get_parameter('self_heading_topic').value
+        self.self_velocity_topic = self.get_parameter('self_velocity_topic').value
         publish_frequency = self.get_parameter('publish_frequency').value  # Hz
 
         peer_params = self.get_parameters_by_prefix('peers')
@@ -39,8 +40,7 @@ class PositionBroadcaster(Node):
         self.self_yaw_rad = None  # radians, clockwise from North (compass convention)
         self.peer_utm = {}  # name -> (easting, northing)
 
-        self.position_publisher = self.create_publisher(PointStamped, 'position', 10)
-        self.yaw_publisher = self.create_publisher(Float64, 'yaw', 10)
+        self.velocity_publisher = self.create_publisher(TwistStamped, 'velocity', 10)
         self.peer_publisher = self.create_publisher(PolygonStamped, 'peer_detection', 10)
 
         self.self_navsat_subscriber = self.create_subscription(
@@ -58,6 +58,14 @@ class PositionBroadcaster(Node):
             10
         )
         self.self_heading_subscriber  # prevent unused variable warning
+
+        self.self_velocity_subscriber = self.create_subscription(
+            TwistStamped,
+            self.self_velocity_topic,
+            self.self_velocity_callback,
+            10
+        )
+        self.self_velocity_subscriber  # prevent unused variable warning
 
         self.peer_subscribers = {}
         for name, topic in self.peer_topics.items():
@@ -86,6 +94,18 @@ class PositionBroadcaster(Node):
     def self_heading_callback(self, msg):
         self.self_yaw_rad = math.radians(msg.data)
 
+    def self_velocity_callback(self, msg):
+        # mavros/local_position/velocity_body is already body-relative
+        # (forward/left speed, body angular rates) -- relay only the
+        # forward/lateral speed and yaw rate the directional derivative
+        # actually needs, dropping the rest.
+        relay = TwistStamped()
+        relay.header = msg.header
+        relay.twist.linear.x = msg.twist.linear.x
+        relay.twist.linear.y = msg.twist.linear.y
+        relay.twist.angular.z = msg.twist.angular.z
+        self.velocity_publisher.publish(relay)
+
     def peer_navsat_callback(self, msg, name):
         if self.transformer is None:
             # Don't know our own UTM zone yet, so peers can't be placed in a
@@ -96,20 +116,6 @@ class PositionBroadcaster(Node):
 
     def timer_callback(self):
         now = self.get_clock().now().to_msg()
-
-        if self.self_utm is not None:
-            point = PointStamped()
-            point.header.stamp = now
-            point.header.frame_id = 'utm'
-            point.point.x = self.self_utm[0]
-            point.point.y = self.self_utm[1]
-            point.point.z = 0.0
-            self.position_publisher.publish(point)
-
-        if self.self_yaw_rad is not None:
-            yaw_msg = Float64()
-            yaw_msg.data = self.self_yaw_rad
-            self.yaw_publisher.publish(yaw_msg)
 
         polygon_msg = PolygonStamped()
         polygon_msg.header.stamp = now

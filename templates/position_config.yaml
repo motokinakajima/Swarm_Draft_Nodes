@@ -2,6 +2,7 @@ position_broadcaster_node:
   ros__parameters:
     self_navsat_topic: "mavros/global_position/global"
     self_heading_topic: "mavros/global_position/compass_hdg"
+    self_velocity_topic: "mavros/local_position/velocity_body"
     publish_frequency: 10.0 #Hz
 
     # Add/remove peers here to change who this node listens to on the

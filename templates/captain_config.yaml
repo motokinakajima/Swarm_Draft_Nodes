@@ -1,5 +1,9 @@
 swarm_captain_node:
   ros__parameters:
+    linear_movement_threshold_degrees: 35.0 #degrees, threshold for determining if the robot is moving in a straight line
+    heading_deadzone_eps: 0.001 #below this |net_force[1]|, treat heading as ambiguous if net_force points backward
+    heading_tiebreak_rate: 0.2 #rad/s, deterministic turn rate used to break the antipodal (180 deg) tie
+
     k_avoidance: 1.0
     k_quark: 1.0
     k_directional: 1.0
@@ -11,3 +15,5 @@ swarm_captain_node:
     quark_saturation_distance: 1.0
     quark_max_force: 1.0
     eps: 0.01
+    directional_eps: 0.01
+    directional_ascend: false #false = descend the field gradient (e.g. move toward cooler), true = ascend (move toward hotter)

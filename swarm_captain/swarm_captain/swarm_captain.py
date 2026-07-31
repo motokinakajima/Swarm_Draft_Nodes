@@ -6,7 +6,7 @@ import numpy as np
 #RGBA, sensor_msg/image
 
 from std_msgs.msg import Float64
-from geometry_msgs.msg import TwistStamped, PolygonStamped, Vector3Stamped, Point32, PointStamped
+from geometry_msgs.msg import TwistStamped, PolygonStamped, Vector3Stamped, Point32
 
 class SwarmCaptain(Node):
     def __init__(self):
@@ -15,6 +15,10 @@ class SwarmCaptain(Node):
             allow_undeclared_parameters=True,
             automatically_declare_parameters_from_overrides=True
         )
+        
+        self.linear_movement_threshold_degrees = self.get_parameter('linear_movement_threshold_degrees').value
+        self.heading_deadzone_eps = self.get_parameter('heading_deadzone_eps').value
+        self.heading_tiebreak_rate = self.get_parameter('heading_tiebreak_rate').value
         
         self.k_avoidance = self.get_parameter('k_avoidance').value
         self.k_quark = self.get_parameter('k_quark').value
@@ -33,6 +37,9 @@ class SwarmCaptain(Node):
         self.pub_force_net = self.create_publisher(Vector3Stamped, 'debug/force_net', 10)
         
         self.eps = self.get_parameter('eps').value
+        self.directional_eps = self.get_parameter('directional_eps').value
+        self.directional_ascend = self.get_parameter('directional_ascend').value
+        self.directional_sign = 1.0 if self.directional_ascend else -1.0
         
         self.peer_detection_subscriber = self.create_subscription(
             PolygonStamped,
@@ -50,21 +57,13 @@ class SwarmCaptain(Node):
         )
         self.temp_subscriber  # prevent unused variable warning
 
-        self.position_subscriber = self.create_subscription(
-            PointStamped,
-            'position',
-            self.position_callback,
+        self.velocity_subscriber = self.create_subscription(
+            TwistStamped,
+            'velocity',
+            self.velocity_callback,
             10
         )
-        self.position_subscriber  # prevent unused variable warning
-
-        self.yaw_subscriber = self.create_subscription(
-            Float64,
-            'yaw',
-            self.yaw_callback,
-            10
-        )
-        self.yaw_subscriber  # prevent unused variable warning
+        self.velocity_subscriber  # prevent unused variable warning
 
         self.velocity_publisher = self.create_publisher(
             TwistStamped,
@@ -74,12 +73,13 @@ class SwarmCaptain(Node):
         
         self.peer_detections = np.empty((0, 2))  # (x, y)
         self.curr_temp = None
-        self.prev_temp = None
-        self.position = np.zeros(2)  # (x, y), meters
-        self.yaw = 0.0
-        
+        self.prev_temp_sample = None  # temp value captured at the previous control tick
+        self.body_velocity = np.zeros(2)  # (forward, left), m/s, body frame
+        self.yaw_rate = 0.0  # rad/s
+
         control_frequency = 10.0  # Hz
-        self.timer = self.create_timer(1.0 / control_frequency, self.make_decision)
+        self.dt = 1.0 / control_frequency
+        self.timer = self.create_timer(self.dt, self.make_decision)
         
     def peer_detection_callback(self, msg):
         if not msg.polygon.points:
@@ -90,14 +90,11 @@ class SwarmCaptain(Node):
         self.peer_detections = np.array(coords)
         
     def temp_callback(self, msg):
-        self.prev_temp = self.curr_temp if self.curr_temp is not None else msg.data
         self.curr_temp = msg.data
 
-    def position_callback(self, msg):
-        self.position = np.array([msg.point.x, msg.point.y])
-
-    def yaw_callback(self, msg):
-        self.yaw = msg.data
+    def velocity_callback(self, msg):
+        self.body_velocity = np.array([msg.twist.linear.x, msg.twist.linear.y])
+        self.yaw_rate = msg.twist.angular.z
 
     def make_decision(self):
         now = self.get_clock().now().to_msg()
@@ -106,6 +103,8 @@ class SwarmCaptain(Node):
         f_quark = self.get_quark() * self.k_quark
         f_dir = self.get_directional() * self.k_directional
         net_force = f_avoid + f_quark + f_dir
+        net_force_magnitude = np.linalg.norm(net_force)
+        magnitude_threshold_x = net_force_magnitude * np.cos(np.radians(self.linear_movement_threshold_degrees))
     
         def publish_vector(publisher, force_array):
             msg = Vector3Stamped()
@@ -123,12 +122,23 @@ class SwarmCaptain(Node):
         
         vel = TwistStamped()
         vel.header.stamp = self.get_clock().now().to_msg()
-        vel.twist.linear.x = net_force[0] * self.k_velocity
+        if net_force[0] > magnitude_threshold_x:
+            vel.twist.linear.x = net_force[0] * self.k_velocity
+        else:
+            vel.twist.linear.x = 0.0
         vel.twist.linear.y = 0.0
         vel.twist.linear.z = 0.0
         vel.twist.angular.x = 0.0
         vel.twist.angular.y = 0.0
-        vel.twist.angular.z = net_force[1] * self.k_heading
+        if abs(net_force[1]) < self.heading_deadzone_eps and net_force[0] < 0.0:
+            # net_force points (almost) directly opposite our heading. The
+            # y-component that normally drives yaw vanishes right at this
+            # antipodal point, so without a tie-breaker the robot would sit
+            # frozen instead of turning around. Force a deterministic turn
+            # direction to break the symmetry.
+            vel.twist.angular.z = self.heading_tiebreak_rate
+        else:
+            vel.twist.angular.z = net_force[1] * self.k_heading
         
         self.velocity_publisher.publish(vel)
     
@@ -157,8 +167,25 @@ class SwarmCaptain(Node):
         return force
     
     def get_directional(self):
-        # TODO: implement
-        return np.zeros(2)
+        force = np.zeros(2)
+
+        if self.prev_temp_sample is not None and self.curr_temp is not None:
+            # Displacement isn't measured directly (no absolute position input);
+            # estimate this tick's step from body-frame velocity instead.
+            delta_pos = self.body_velocity * self.dt
+            step_sq = float(np.dot(delta_pos, delta_pos))
+
+            if step_sq > self.directional_eps:
+                delta_f = self.curr_temp - self.prev_temp_sample
+                projection_scale = delta_f / (step_sq + self.directional_eps)
+                projected_gradient = delta_pos * projection_scale
+                force = self.directional_sign * projected_gradient
+
+        # Snapshot this tick's temp as the "previous" sample for the next tick,
+        # keeping delta_pos and delta_f synchronized to the same time window.
+        self.prev_temp_sample = self.curr_temp
+
+        return force
     
 def main(args=None):
     rclpy.init(args=args)
