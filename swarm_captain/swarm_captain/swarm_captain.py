@@ -121,7 +121,8 @@ class SwarmCaptain(Node):
         publish_vector(self.pub_force_net, net_force)
         
         vel = TwistStamped()
-        vel.header.stamp = self.get_clock().now().to_msg()
+        vel.header.stamp = now
+        vel.header.frame_id = 'base_link'
         if net_force[0] > magnitude_threshold_x:
             vel.twist.linear.x = net_force[0] * self.k_velocity
         else:
