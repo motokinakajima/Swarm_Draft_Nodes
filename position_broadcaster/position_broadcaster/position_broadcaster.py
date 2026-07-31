@@ -3,7 +3,7 @@ import math
 import rclpy
 from rclpy.node import Node
 
-from pyproj import Transformer
+import utm
 
 from sensor_msgs.msg import NavSatFix
 from std_msgs.msg import Float64
@@ -35,7 +35,6 @@ class PositionBroadcaster(Node):
             if prop == 'topic':
                 self.peer_topics[peer_name] = param.value
 
-        self.transformer = None  # created once we know our own UTM zone
         self.self_utm = None  # (easting, northing)
         self.self_yaw_rad = None  # radians, clockwise from North (compass convention)
         self.peer_utm = {}  # name -> (easting, northing)
@@ -80,15 +79,8 @@ class PositionBroadcaster(Node):
 
         self.timer = self.create_timer(1.0 / publish_frequency, self.timer_callback)
 
-    def _ensure_transformer(self, lat, lon):
-        if self.transformer is None:
-            epsg = utm_epsg_for(lat, lon)
-            self.transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
-            self.get_logger().info(f"UTM zone locked from own position: EPSG:{epsg}")
-
     def self_navsat_callback(self, msg):
-        self._ensure_transformer(msg.latitude, msg.longitude)
-        easting, northing = self.transformer.transform(msg.longitude, msg.latitude)
+        easting, northing, zone_number, zone_letter = utm.from_latlon(msg.latitude, msg.longitude)
         self.self_utm = (easting, northing)
 
     def self_heading_callback(self, msg):
@@ -107,11 +99,7 @@ class PositionBroadcaster(Node):
         self.velocity_publisher.publish(relay)
 
     def peer_navsat_callback(self, msg, name):
-        if self.transformer is None:
-            # Don't know our own UTM zone yet, so peers can't be placed in a
-            # frame common with ours.
-            return
-        easting, northing = self.transformer.transform(msg.longitude, msg.latitude)
+        easting, northing, zone_number, zone_letter = utm.from_latlon(msg.latitude, msg.longitude)
         self.peer_utm[name] = (easting, northing)
 
     def timer_callback(self):
