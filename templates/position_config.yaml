@@ -1,0 +1,14 @@
+position_broadcaster_node:
+  ros__parameters:
+    self_navsat_topic: "mavros/global_position/global"
+    self_heading_topic: "mavros/global_position/compass_hdg"
+    publish_frequency: 10.0 #Hz
+
+    # Add/remove peers here to change who this node listens to on the
+    # network -- no code changes needed. Each entry just needs a topic
+    # publishing sensor_msgs/NavSatFix for that peer.
+    peers:
+      robot1:
+        topic: "/robot1/mavros/global_position/global"
+      robot2:
+        topic: "/robot2/mavros/global_position/global"

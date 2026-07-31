@@ -1,0 +1,148 @@
+import math
+
+import rclpy
+from rclpy.node import Node
+
+from pyproj import Transformer
+
+from sensor_msgs.msg import NavSatFix
+from std_msgs.msg import Float64
+from geometry_msgs.msg import PointStamped, PolygonStamped, Point32
+
+
+def utm_epsg_for(lat, lon):
+    zone = int((lon + 180.0) / 6.0) + 1
+    return (32600 if lat >= 0 else 32700) + zone
+
+
+class PositionBroadcaster(Node):
+    def __init__(self):
+        super().__init__(
+            'position_broadcaster',
+            allow_undeclared_parameters=True,
+            automatically_declare_parameters_from_overrides=True
+        )
+
+        self.self_navsat_topic = self.get_parameter('self_navsat_topic').value
+        self.self_heading_topic = self.get_parameter('self_heading_topic').value
+        publish_frequency = self.get_parameter('publish_frequency').value  # Hz
+
+        peer_params = self.get_parameters_by_prefix('peers')
+        self.peer_topics = {}  # name -> topic
+        for key, param in peer_params.items():
+            peer_name, prop = key.split('.', 1)
+            if prop == 'topic':
+                self.peer_topics[peer_name] = param.value
+
+        self.transformer = None  # created once we know our own UTM zone
+        self.self_utm = None  # (easting, northing)
+        self.self_yaw_rad = None  # radians, clockwise from North (compass convention)
+        self.peer_utm = {}  # name -> (easting, northing)
+
+        self.position_publisher = self.create_publisher(PointStamped, 'position', 10)
+        self.yaw_publisher = self.create_publisher(Float64, 'yaw', 10)
+        self.peer_publisher = self.create_publisher(PolygonStamped, 'peer_detection', 10)
+
+        self.self_navsat_subscriber = self.create_subscription(
+            NavSatFix,
+            self.self_navsat_topic,
+            self.self_navsat_callback,
+            10
+        )
+        self.self_navsat_subscriber  # prevent unused variable warning
+
+        self.self_heading_subscriber = self.create_subscription(
+            Float64,
+            self.self_heading_topic,
+            self.self_heading_callback,
+            10
+        )
+        self.self_heading_subscriber  # prevent unused variable warning
+
+        self.peer_subscribers = {}
+        for name, topic in self.peer_topics.items():
+            subscriber = self.create_subscription(
+                NavSatFix,
+                topic,
+                lambda msg, name=name: self.peer_navsat_callback(msg, name),
+                10
+            )
+            self.peer_subscribers[name] = subscriber
+            self.get_logger().info(f"Subscribed to peer [{name}] on topic: {topic}")
+
+        self.timer = self.create_timer(1.0 / publish_frequency, self.timer_callback)
+
+    def _ensure_transformer(self, lat, lon):
+        if self.transformer is None:
+            epsg = utm_epsg_for(lat, lon)
+            self.transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
+            self.get_logger().info(f"UTM zone locked from own position: EPSG:{epsg}")
+
+    def self_navsat_callback(self, msg):
+        self._ensure_transformer(msg.latitude, msg.longitude)
+        easting, northing = self.transformer.transform(msg.longitude, msg.latitude)
+        self.self_utm = (easting, northing)
+
+    def self_heading_callback(self, msg):
+        self.self_yaw_rad = math.radians(msg.data)
+
+    def peer_navsat_callback(self, msg, name):
+        if self.transformer is None:
+            # Don't know our own UTM zone yet, so peers can't be placed in a
+            # frame common with ours.
+            return
+        easting, northing = self.transformer.transform(msg.longitude, msg.latitude)
+        self.peer_utm[name] = (easting, northing)
+
+    def timer_callback(self):
+        now = self.get_clock().now().to_msg()
+
+        if self.self_utm is not None:
+            point = PointStamped()
+            point.header.stamp = now
+            point.header.frame_id = 'utm'
+            point.point.x = self.self_utm[0]
+            point.point.y = self.self_utm[1]
+            point.point.z = 0.0
+            self.position_publisher.publish(point)
+
+        if self.self_yaw_rad is not None:
+            yaw_msg = Float64()
+            yaw_msg.data = self.self_yaw_rad
+            self.yaw_publisher.publish(yaw_msg)
+
+        polygon_msg = PolygonStamped()
+        polygon_msg.header.stamp = now
+        polygon_msg.header.frame_id = 'base_link'
+
+        if self.self_utm is not None and self.self_yaw_rad is not None:
+            yaw = self.self_yaw_rad
+            for peer_e, peer_n in self.peer_utm.values():
+                delta_e = peer_e - self.self_utm[0]
+                delta_n = peer_n - self.self_utm[1]
+
+                # Compass yaw (0 = North, clockwise) rotated into the robot's
+                # own x-forward/y-left body frame, so this lines up with the
+                # frame the camera-based peer_detector used to publish in.
+                x_body = delta_e * math.sin(yaw) + delta_n * math.cos(yaw)
+                y_body = -delta_e * math.cos(yaw) + delta_n * math.sin(yaw)
+
+                point = Point32()
+                point.x = float(x_body)
+                point.y = float(y_body)
+                point.z = 0.0
+                polygon_msg.polygon.points.append(point)
+
+        self.peer_publisher.publish(polygon_msg)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    position_broadcaster = PositionBroadcaster()
+    rclpy.spin(position_broadcaster)
+    position_broadcaster.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

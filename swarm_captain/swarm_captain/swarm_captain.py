@@ -6,7 +6,7 @@ import numpy as np
 #RGBA, sensor_msg/image
 
 from std_msgs.msg import Float64
-from geometry_msgs.msg import TwistStamped, PolygonStamped, Vector3Stamped, Point32
+from geometry_msgs.msg import TwistStamped, PolygonStamped, Vector3Stamped, Point32, PointStamped
 
 class SwarmCaptain(Node):
     def __init__(self):
@@ -49,7 +49,23 @@ class SwarmCaptain(Node):
             10
         )
         self.temp_subscriber  # prevent unused variable warning
-        
+
+        self.position_subscriber = self.create_subscription(
+            PointStamped,
+            'position',
+            self.position_callback,
+            10
+        )
+        self.position_subscriber  # prevent unused variable warning
+
+        self.yaw_subscriber = self.create_subscription(
+            Float64,
+            'yaw',
+            self.yaw_callback,
+            10
+        )
+        self.yaw_subscriber  # prevent unused variable warning
+
         self.velocity_publisher = self.create_publisher(
             TwistStamped,
             'mavros/setpoint_velocity/cmd_vel',
@@ -59,6 +75,8 @@ class SwarmCaptain(Node):
         self.peer_detections = np.empty((0, 2))  # (x, y)
         self.curr_temp = None
         self.prev_temp = None
+        self.position = np.zeros(2)  # (x, y), meters
+        self.yaw = 0.0
         
         control_frequency = 10.0  # Hz
         self.timer = self.create_timer(1.0 / control_frequency, self.make_decision)
@@ -74,6 +92,12 @@ class SwarmCaptain(Node):
     def temp_callback(self, msg):
         self.prev_temp = self.curr_temp if self.curr_temp is not None else msg.data
         self.curr_temp = msg.data
+
+    def position_callback(self, msg):
+        self.position = np.array([msg.point.x, msg.point.y])
+
+    def yaw_callback(self, msg):
+        self.yaw = msg.data
 
     def make_decision(self):
         now = self.get_clock().now().to_msg()
@@ -112,6 +136,8 @@ class SwarmCaptain(Node):
         force = np.zeros(2)
         for peer in self.peer_detections:
             d = np.linalg.norm(peer)
+            if d == 0:
+                continue
             if d < self.avoidance_radius:
                 unit_away = -peer / d
                 magnitude = 1.0 / (d + self.eps)
