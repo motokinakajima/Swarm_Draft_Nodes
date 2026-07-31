@@ -2,8 +2,11 @@ import numpy as np
 import scipy.io
 import matplotlib.pyplot as plt
 
-min_lon, max_lon = -72.251444, -72.241181
-min_lat, max_lat = 43.741064, 43.743681
+#min_lon, max_lon = -72.251444, -72.241181
+#min_lat, max_lat = 43.741064, 43.743681
+
+min_lon, max_lon = -72.24887825, -72.24374675
+min_lat, max_lat = 43.74171825, 43.74302675
 
 lon_line = np.linspace(min_lon, max_lon, 50)
 lat_line = np.linspace(min_lat, max_lat, 50)
@@ -48,8 +51,8 @@ data_package = {
     'zMean': zMean,
     'zVar': zVar
 }
-scipy.io.savemat('wilsons_landing_multimodal.mat', data_package)
-print("Successfully generated 'wilsons_landing_multimodal.mat' using C++ logic!")
+scipy.io.savemat('wilsons_landing_smaller_multimodal.mat', data_package)
+print("Successfully generated 'wilsons_landing_smaller_multimodal.mat' using C++ logic!")
 
 plt.figure(figsize=(10, 6))
 mesh = plt.pcolormesh(lonMesh, latMesh, zMean, shading='auto', cmap='coolwarm')

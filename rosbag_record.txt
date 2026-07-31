@@ -1,0 +1,21 @@
+ros2 bag record \
+/mavros/global_position/global \
+/mavros/global_position/compass_hdg \
+/mavros/local_position/velocity_body \
+/mavros/setpoint_velocity/cmd_vel \
+/velocity \
+/peer_detection \
+debug/force_avoidance \
+/debug/force_quark \
+/debug/force_directional \
+/debug/force_net \
+/robot1/mavros/global_position/global \
+/robot1/mavros/global_position/compass_hdg \
+/robot1/mavros/local_position/velocity_body \
+/robot1/mavros/setpoint_velocity/cmd_vel \
+/robot1/velocity \
+/robot1/peer_detection \
+/robot1/debug/force_avoidance \
+/robot1/debug/force_quark \
+/robot1/debug/force_directional \
+/robot1/debug/force_net \
