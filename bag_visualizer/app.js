@@ -25,10 +25,12 @@ const robotInfo = document.getElementById('robot-info');
 
 const toggles = {
   field: document.getElementById('toggle-field'),
+  satellite: document.getElementById('toggle-satellite'),
   peers: document.getElementById('toggle-peers'),
   trails: document.getElementById('toggle-trails'),
   forces: document.getElementById('toggle-forces'),
 };
+const satAttribution = document.getElementById('sat-attribution');
 
 let dataset = null;
 let frameIdx = 0;
@@ -37,6 +39,8 @@ let lastTickMs = null;
 let view = { scale: 1, offsetX: 0, offsetY: 0 }; // world meters -> screen px
 let trails = {};
 let fieldCanvas = null;
+let satCanvas = null; // { canvas, worldX0, worldY0, worldX1, worldY1 }
+let satLoadToken = 0; // guards against a stale fetch finishing after a reload
 
 function resizeCanvas() {
   // Measure the canvas's own flexbox-computed CSS size (not the parent's,
@@ -61,11 +65,21 @@ async function loadData(url) {
 
   scrubber.max = String(dataset.frames.length - 1);
   scrubber.value = '0';
-  metaInfo.textContent = `origin ${dataset.meta.origin_lat?.toFixed(6)}, ${dataset.meta.origin_lon?.toFixed(6)} · ${dataset.frames.length} frames @ ${(1 / dataset.meta.dt).toFixed(1)} Hz · ${dataset.meta.duration.toFixed(1)}s`;
+  let metaText = `origin ${dataset.meta.origin_lat?.toFixed(6)}, ${dataset.meta.origin_lon?.toFixed(6)} · ${dataset.frames.length} frames @ ${(1 / dataset.meta.dt).toFixed(1)} Hz · ${dataset.meta.duration.toFixed(1)}s`;
 
-  if (dataset.field) bakeFieldCanvas();
+  if (dataset.field) {
+    bakeFieldCanvas();
+    const fieldDist = fieldDistanceFromRobots();
+    if (fieldDist != null && fieldDist > 1000) {
+      metaText += ` · ⚠ temperature field is ~${(fieldDist / 1000).toFixed(1)}km from the robots - it won't be visible at the default zoom`;
+    }
+  }
+  metaInfo.textContent = metaText;
   computeForceScale();
   fitView();
+  satCanvas = null;
+  satAttribution.classList.remove('visible');
+  if (toggles.satellite.checked) loadSatelliteBasemap();
   render();
 }
 
@@ -86,6 +100,13 @@ function computeForceScale() {
   forceWorldScale = maxMag > 1e-9 ? targetMeters / maxMag : 1;
 }
 
+// The temperature field is pinned to whatever real GPS location it was
+// generated for (see fake_tempratures/generate_mat.py), which has no
+// relation to wherever a given bag was actually recorded. If the two are
+// far apart, folding the field's extent into the camera fit would zoom out
+// to cover both, shrinking the actual robot trajectory to a speck - so the
+// camera/zoom fit to the robots only. The field/satellite layers still draw
+// wherever they geographically land; they just don't drive the default view.
 function worldExtent() {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   const consider = (x, y) => {
@@ -94,10 +115,6 @@ function worldExtent() {
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
   };
-  if (dataset.field) {
-    for (const row of dataset.field.x) for (const v of row) consider(v, 0);
-    for (const row of dataset.field.y) for (const v of row) consider(0, v);
-  }
   for (const frame of dataset.frames) {
     for (const r of dataset.meta.robots) {
       const rob = frame.robots[r];
@@ -107,6 +124,19 @@ function worldExtent() {
   if (!isFinite(minX)) { minX = -10; maxX = 10; minY = -10; maxY = 10; }
   const pad = Math.max(5, (maxX - minX) * 0.1, (maxY - minY) * 0.1);
   return { minX: minX - pad, maxX: maxX + pad, minY: minY - pad, maxY: maxY + pad };
+}
+
+function fieldDistanceFromRobots() {
+  if (!dataset.field) return null;
+  const { minX, maxX, minY, maxY } = worldExtent();
+  const robotCx = (minX + maxX) / 2, robotCy = (minY + maxY) / 2;
+
+  const fx = dataset.field.x, fy = dataset.field.y;
+  const rows = fx.length, cols = fx[0].length;
+  const fieldCx = (fx[0][0] + fx[rows - 1][cols - 1]) / 2;
+  const fieldCy = (fy[0][0] + fy[rows - 1][cols - 1]) / 2;
+
+  return Math.hypot(fieldCx - robotCx, fieldCy - robotCy);
 }
 
 function fitView() {
@@ -124,6 +154,117 @@ function toScreen(x, y) {
   return [x * view.scale + view.offsetX, -y * view.scale + view.offsetY];
 }
 
+// --- Satellite basemap -----------------------------------------------------
+// Positions in the dataset are meters offset (east, north) from a single
+// GPS origin (meta.origin_lat/lon), same frame the temperature field uses.
+// Web Mercator is conformal, so instead of inverse-projecting every point
+// we only need the origin's mercator pixel coordinate plus a uniform
+// meters-per-pixel scale at that latitude/zoom - then any local (dx, dy)
+// maps to (origin_px + dx*ppm, origin_py - dy*ppm).
+const TILE_SIZE = 256;
+const SAT_TILE_URL = (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+
+function lonLatToMercatorPx(lon, lat, zoom) {
+  const scale = TILE_SIZE * Math.pow(2, zoom);
+  const x = (lon + 180) / 360 * scale;
+  const sinLat = Math.sin(lat * Math.PI / 180);
+  const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
+  return [x, y];
+}
+
+function metersPerPixel(lat, zoom) {
+  return 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
+}
+
+async function loadSatelliteBasemap() {
+  if (!dataset || dataset.meta.origin_lat == null) return;
+  const token = ++satLoadToken;
+  const { minX, maxX, minY, maxY } = worldExtent();
+  const lat0 = dataset.meta.origin_lat, lon0 = dataset.meta.origin_lon;
+  const spanMeters = Math.max(maxX - minX, maxY - minY);
+
+  // Pick a starting zoom whose ground resolution roughly matches one
+  // world-extent pixel per tile pixel. Esri's World Imagery coverage is
+  // often much coarser than zoom 19 outside urban areas though, so a small
+  // robot spread can pick a zoom with no actual tiles there (silent 404s ->
+  // a blank basemap). Try progressively coarser zooms until most requested
+  // tiles actually load.
+  let startZoom = 19;
+  for (; startZoom > 0; startZoom--) {
+    const mpp = metersPerPixel(lat0, startZoom);
+    if (spanMeters / mpp <= 6 * TILE_SIZE) break; // keep the tile grid <= ~6 tiles across
+  }
+
+  let result = null;
+  for (let zoom = startZoom; zoom >= 3; zoom--) {
+    const attempt = await fetchSatelliteTiles(minX, maxX, minY, maxY, lat0, lon0, zoom);
+    if (token !== satLoadToken) return; // a newer load superseded this one
+    if (!attempt) continue; // too many tiles for this zoom - try coarser
+    result = attempt;
+    if (attempt.successRatio >= 0.5) break; // good enough coverage, stop here
+  }
+
+  if (!result || result.successRatio === 0) {
+    console.warn('Satellite basemap: no Esri imagery found for this location at any zoom.');
+    return;
+  }
+
+  satCanvas = result;
+  satAttribution.classList.add('visible');
+  render();
+}
+
+async function fetchSatelliteTiles(minX, maxX, minY, maxY, lat0, lon0, zoom) {
+  const ppm = 1 / metersPerPixel(lat0, zoom); // pixels per meter at this zoom
+  const [originPx, originPy] = lonLatToMercatorPx(lon0, lat0, zoom);
+  const toMercPx = (wx, wy) => [originPx + wx * ppm, originPy - wy * ppm];
+
+  const [px0, py0] = toMercPx(minX, maxY); // top-left (north-west)
+  const [px1, py1] = toMercPx(maxX, minY); // bottom-right (south-east)
+
+  const tileX0 = Math.floor(px0 / TILE_SIZE), tileX1 = Math.floor(px1 / TILE_SIZE);
+  const tileY0 = Math.floor(py0 / TILE_SIZE), tileY1 = Math.floor(py1 / TILE_SIZE);
+  const nx = tileX1 - tileX0 + 1, ny = tileY1 - tileY0 + 1;
+  if (nx <= 0 || ny <= 0 || nx * ny > 64) return null; // sanity guard
+
+  const off = document.createElement('canvas');
+  off.width = nx * TILE_SIZE;
+  off.height = ny * TILE_SIZE;
+  const octx = off.getContext('2d');
+
+  let successes = 0;
+  const loads = [];
+  for (let ty = tileY0; ty <= tileY1; ty++) {
+    for (let tx = tileX0; tx <= tileX1; tx++) {
+      const img = new Image();
+      const dx = (tx - tileX0) * TILE_SIZE, dy = (ty - tileY0) * TILE_SIZE;
+      loads.push(new Promise(resolve => {
+        img.onload = () => { octx.drawImage(img, dx, dy); successes++; resolve(); };
+        img.onerror = () => resolve(); // leave that tile blank rather than fail the whole basemap
+        img.src = SAT_TILE_URL(zoom, tx, ty);
+      }));
+    }
+  }
+  await Promise.all(loads);
+
+  const worldX0 = (tileX0 * TILE_SIZE - originPx) / ppm;
+  const worldY0 = (originPy - tileY0 * TILE_SIZE) / ppm;
+  const worldX1 = ((tileX1 + 1) * TILE_SIZE - originPx) / ppm;
+  const worldY1 = (originPy - (tileY1 + 1) * TILE_SIZE) / ppm;
+
+  return { canvas: off, worldX0, worldY0, worldX1, worldY1, successRatio: successes / (nx * ny), zoom };
+}
+
+function drawSatellite() {
+  if (!satCanvas || !toggles.satellite.checked) return;
+  const [sx0, sy0] = toScreen(satCanvas.worldX0, satCanvas.worldY0);
+  const [sx1, sy1] = toScreen(satCanvas.worldX1, satCanvas.worldY1);
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(satCanvas.canvas, Math.min(sx0, sx1), Math.min(sy0, sy1), Math.abs(sx1 - sx0), Math.abs(sy1 - sy0));
+  ctx.restore();
+}
+
 function bakeFieldCanvas() {
   const { x, y, z } = dataset.field;
   const rows = z.length, cols = z[0].length;
@@ -135,11 +276,17 @@ function bakeFieldCanvas() {
   off.height = rows;
   const octx = off.getContext('2d');
   const img = octx.createImageData(cols, rows);
+  // Row 0 of the .mat grid is the southernmost latitude (generate_mat.py
+  // builds it from linspace(min_lat, max_lat, ...)), but canvas row 0 is
+  // drawn at the top of the image - which drawField() then places at the
+  // north edge on screen. Left as-is, that puts south data at the north
+  // edge: flip the row order here so image-row-0 (top/north) actually holds
+  // the northernmost data.
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const t = (z[r][c] - zmin) / (zmax - zmin + 1e-9);
       const [rr, gg, bb] = coolwarm(t);
-      const idx = (r * cols + c) * 4;
+      const idx = ((rows - 1 - r) * cols + c) * 4;
       img.data[idx] = rr; img.data[idx + 1] = gg; img.data[idx + 2] = bb; img.data[idx + 3] = 200;
     }
   }
@@ -311,6 +458,7 @@ function render() {
 
   const frame = dataset.frames[frameIdx];
 
+  drawSatellite();
   drawField();
   drawGrid();
 
@@ -376,6 +524,16 @@ reloadBtn.addEventListener('click', () => {
   playBtn.textContent = 'Play';
   loadData(dataUrlInput.value).catch(err => alert(err.message));
 });
+
+for (const [key, el] of Object.entries(toggles)) {
+  el.addEventListener('change', () => {
+    if (key === 'satellite') {
+      satAttribution.classList.toggle('visible', el.checked && !!satCanvas);
+      if (el.checked && !satCanvas) loadSatelliteBasemap();
+    }
+    render();
+  });
+}
 
 resizeCanvas();
 loadData(dataUrlInput.value).catch(err => console.warn('No data loaded yet:', err.message));

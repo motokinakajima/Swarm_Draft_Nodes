@@ -55,6 +55,23 @@ main {
   flex: 1;
   display: flex;
   min-height: 0;
+  position: relative;
+}
+
+#sat-attribution {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  font-size: 10px;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 1px 5px;
+  border-radius: 3px;
+  pointer-events: none;
+  display: none;
+}
+#sat-attribution.visible {
+  display: block;
 }
 
 #stage {

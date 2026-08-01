@@ -32,8 +32,9 @@ python3 extract_bag.py /path/to/bag_dir -o data.json \
     --temp-field ../fake_tempratures/wilsons_landing_smaller_multimodal.mat
 ```
 
-Then serve this folder (browsers block `fetch()` of local files over
-`file://`) and open it:
+Then serve this folder and open it through **http://**, not by
+double-clicking `index.html` — browsers block `fetch()` of local JSON over
+`file://` with a CORS error:
 
 ```bash
 python3 serve.py
@@ -55,3 +56,7 @@ Use the "Data" field in the footer to point at a different extracted
 - The player resamples all topics onto a fixed-rate timeline (default 10 Hz,
   matching `swarm_captain`'s control rate) using last-value-hold, since the
   underlying topics don't publish in lockstep.
+- The "Satellite basemap" layer fetches real imagery tiles from Esri's public
+  World Imagery service directly in your browser, aligned to the same GPS
+  origin as everything else. It needs internet access at view time (won't
+  work fully offline) and isn't loaded until you check the box.
