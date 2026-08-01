@@ -1,0 +1,4 @@
+rosbags
+utm
+scipy
+numpy

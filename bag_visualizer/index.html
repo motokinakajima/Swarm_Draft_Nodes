@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Swarm Bag Visualizer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Swarm Bag Visualizer</h1>
+    <div id="meta-info"></div>
+  </header>
+
+  <main>
+    <canvas id="stage"></canvas>
+
+    <aside id="panel">
+      <section>
+        <h2>Layers</h2>
+        <label><input type="checkbox" id="toggle-field" checked> Temperature field</label>
+        <label><input type="checkbox" id="toggle-peers" checked> Peer detections</label>
+        <label><input type="checkbox" id="toggle-trails" checked> Trails</label>
+        <label><input type="checkbox" id="toggle-forces" checked> Force vectors</label>
+      </section>
+
+      <section>
+        <h2>Force legend</h2>
+        <div class="legend-row"><span class="swatch" style="background:#e05252"></span> avoidance</div>
+        <div class="legend-row"><span class="swatch" style="background:#5588e0"></span> quark (cohesion)</div>
+        <div class="legend-row"><span class="swatch" style="background:#4caf50"></span> directional (gradient)</div>
+        <div class="legend-row"><span class="swatch" style="background:#222"></span> net</div>
+      </section>
+
+      <section>
+        <h2>Robots</h2>
+        <div id="robot-info"></div>
+      </section>
+    </aside>
+  </main>
+
+  <footer>
+    <button id="play-btn">Play</button>
+    <input type="range" id="scrubber" min="0" max="0" value="0" step="1">
+    <span id="time-label">0.0 / 0.0 s</span>
+    <label>Speed
+      <select id="speed-select">
+        <option value="0.25">0.25x</option>
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+      </select>
+    </label>
+    <label>Data <input type="text" id="data-url" value="data.json" size="20"></label>
+    <button id="reload-btn">Load</button>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
